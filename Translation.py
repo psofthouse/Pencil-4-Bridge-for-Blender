@@ -26,8 +26,14 @@ translation_dict = {
             "自動",
         (ctxt, "Scale Factor"):
             "スケール係数",
+        (ctxt, "Pencil+ 4 Materials"):
+            "Pencil+ 4 マテリアル",
         (ctxt, "Pencil+ 4 Lines"):
             "Pencil+ 4 ライン",
+        (ctxt, "Materials (Line Functions)"):
+            "マテリアル (ライン関連機能)",
+        (ctxt, "Import Destination"):
+            "インポート先",
         (ctxt, "Import disabled Specific Brush Settings"):
             "無効の 個別ブラシ設定 を読み込む",
         (ctxt, "Import disabled Reduction Settings"):

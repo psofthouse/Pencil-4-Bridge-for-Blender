@@ -4,9 +4,9 @@
 bl_info = {
     "name": "PSOFT Pencil+ 4 Bridge",
     "author": "P SOFTHOUSE",
-    "description": "Transfer Pencil+ 4 Line settings between Blender and 3ds Max, Maya and Unity [469f4d4b]",
+    "description": "Transfer Pencil+ 4 Line settings between Blender and 3ds Max, Maya and Unity [8aed82d4]",
     "blender": (3, 0, 0),
-    "version": (4, 0, 0),
+    "version": (4, 0, 1),
     "location": "",
     "warning": "",
     "category": "Import-Export"

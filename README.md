@@ -4,9 +4,9 @@
 <img src="https://docs.psoft.co.jp/plb400wbridge/en/4.0.0/img/mainbanner.png" title="mainbanner">
 </div>
 
-Pencil+ 4 Bridge for Blender is an extension add-on used to transfer Pencil+ 4 Line settings between Blender and 3ds Max, Maya and Unity. The data is managed as a file separate from the scene file, so it can easily be applied to another scene.
+Pencil+ 4 Bridge for Blender is an extension add-on used to transfer Pencil+ 4 Material and Line settings between Blender and 3ds Max, Maya and Unity. The data is managed as a file separate from the scene file, so it can easily be applied to another scene.
 
-PSOFT Pencil+ 4 Bridge for Blender は、Blender と 3ds Max、Maya、Unity の間で Pencil+ 4 ラインの設定が受け渡しできる Pencil+ 4 Bridge の拡張アドオンです。シーンファイルとは別のファイルとして管理できるため、他のシーンへ容易に適用することができます。
+PSOFT Pencil+ 4 Bridge for Blender は、Blender と 3ds Max、Maya、Unity の間で Pencil+ 4 マテリアルとラインの設定が受け渡しできる Pencil+ 4 Bridge の拡張アドオンです。シーンファイルとは別のファイルとして管理できるため、他のシーンへ容易に適用することができます。
 
 
 ## Installation
@@ -23,7 +23,12 @@ Please consult the [online manual](https://docs.psoft.co.jp/plb400wbridge/en/lat
 アドオンの使用方法は[オンラインマニュアル](https://docs.psoft.co.jp/plb400wbridge/jp/latest/index.html)を参照してください。
 
 
-## Related Repositories
+## Related Links
 
-- Pencil+ 4 Line for Blender
+- Pencil+ 4 Material for Blender  
+https://www.psoft.co.jp/en/product/pencil/blender/material/  
+https://www.psoft.co.jp/jp/product/pencil/blender/material/
+
+
+- Pencil+ 4 Line for Blender  
 https://github.com/psofthouse/Pencil-4-Line-for-Blender

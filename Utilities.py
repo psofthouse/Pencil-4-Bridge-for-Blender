@@ -8,6 +8,8 @@ from . import Settings as settings
 
 
 def enumerate_all_node_trees():
+    if not is_line_addon_installed():
+        return ()
     return (x for x in bpy.data.node_groups if x.bl_idname == "Pencil4NodeTreeType")
 
 
@@ -15,11 +17,9 @@ def enumerate_all_nodes():
     return chain.from_iterable(tree.nodes for tree in enumerate_all_node_trees())
 
 
-def enumerate_all_lines():
-    return (x for x in enumerate_all_nodes() if x.bl_idname == "Pencil4LineNodeType")
-
-
 def enumerate_material_and_line_functions():
+    if not is_line_addon_installed():
+        return
     for mat in bpy.data.materials:
         if mat.pcl4_line_functions is None:
             continue
@@ -101,3 +101,19 @@ def is_file_version_supported(version):
                or major == majorMax and minor < minorMax
     except ValueError:
         return False
+
+def operator_call_with_override(op, context, overrides, args={}):
+    override = context.copy()
+    for k, v in overrides.items():
+        override[k] = v
+    if hasattr(context, "temp_override"):
+        with context.temp_override(**override):
+            op('INVOKE_DEFAULT', **args)
+    else:
+        op(override, 'INVOKE_DEFAULT', **args)
+
+def is_material_addon_installed() -> bool:
+    return hasattr(bpy.types.Material, "is_pcl4_material")
+
+def is_line_addon_installed() -> bool:
+    return hasattr(bpy.types.Material, "pcl4_line_functions")

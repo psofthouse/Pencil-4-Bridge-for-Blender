@@ -17,6 +17,7 @@ class AType:
     FLOAT_ANGLE = "floatAngle"
     FLOAT_WITH_SCALE = "floatWithScale"
     BOOL = "bool"
+    BOOL_LIST_8 = "boolList8"
     ENUM = "enum"
     FLOAT_VECTOR_2 = "floatVector2"
     COLOR = "color"
@@ -26,6 +27,11 @@ class AType:
     MATERIAL_LIST = "materialList"
     ADVANCED_MATERIAL = "advancedMaterial"  # Max版との仕様の違いの吸収用
     USERDEF = "userDef"
+    POSITION_GROUP = "positionGroup"
+    COLOR_GROUP = "colorGroup"
+    FLOAT_ARRAY = "floatArray"
+    FLOAT_ARRAY_STRING = "floatArrayString"
+    COLOR_ARRAY_STRING = "colorArrayString"
     NOT_IMPLEMENTED = "notImplemented"
 
 
@@ -35,6 +41,8 @@ class KeyNames:
     SCALE_FACTOR = "ScaleFactor"
     LINES = "LineNode"
     MATERIALS = "MaterialNode"
+    POSITION_GROUP = "PositionGroup"
+    COLOR_GROUP = "ColorGroup"
     PENCIL_MATERIAL = "PencilMaterial"
     BLENDER_CURVE_KEYS = "BlenderCurveKeys"
     UNIVERSAL_CURVE_KEYS = "UniversalKeys"
@@ -325,9 +333,101 @@ class TextureMapNode(Node):
 
 
 class PencilMaterialNode(Node):
-    pass
+    _nameToExport = "PencilMaterial"
+    _blenderNodeName = ""
+    _blenderNodeId = ""
+    AdvancedMaterial = None, AType.ADVANCED_MATERIAL
+    BlendMode = "pcl4mtl_highlight_blend", AType.ENUM
+    BlendAmount = "pcl4mtl_highlight_amount", AType.FLOAT
+    HighlightColor = "pcl4mtl_highlight_color", AType.COLOR
+    ColorMapOn = None, AType.NOT_IMPLEMENTED
+    ColorMap = None, AType.NOT_IMPLEMENTED
+    MapOpacity = None, AType.NOT_IMPLEMENTED
+    SpecularLevel = "pcl4mtl_highlight_level", AType.FLOAT
+    Glossiness = "pcl4mtl_highlight_glossiness", AType.FLOAT
+    Anisotropic = None, AType.NOT_IMPLEMENTED
+    Orientation = None, AType.NOT_IMPLEMENTED
+    Sharpness = "pcl4mtl_highlight_sharpness", AType.FLOAT
+    Squash = None, AType.NOT_IMPLEMENTED
+    DiffractionEffect = None, AType.NOT_IMPLEMENTED
+    Range = None, AType.NOT_IMPLEMENTED
+    PositionGroup = "pcl4mtl_position_group", AType.POSITION_GROUP
+    ColorGroup = "pcl4mtl_color_group", AType.COLOR_GROUP
 
 
 class AdvancedMaterialNode(Node):
-    pass
+    _nameToExport = "AdvancedMaterial"
+    _blenderNodeName = ""
+    _blenderNodeId = ""
+    GradOffsetEnable = "pcl4mtl_grad_offset_on", AType.BOOL
+    GradOffsetAmount = "pcl4mtl_grad_offset_amount", AType.FLOAT
+    GradOffsetMap = None, AType.NOT_IMPLEMENTED
+    GradOffsetMapOffset = "pcl4mtl_grad_offset_offset", AType.FLOAT
+    SblendEnable = None, AType.NOT_IMPLEMENTED
+    SblendColor = None, AType.NOT_IMPLEMENTED
+    SblendMapOpacity = None, AType.NOT_IMPLEMENTED
+    SblendMapEnable = None, AType.NOT_IMPLEMENTED
+    SblendMap = None, AType.NOT_IMPLEMENTED
+    SblendMode = None, AType.NOT_IMPLEMENTED
+    SblendAmount = None, AType.NOT_IMPLEMENTED
+    LightColEnable = "pcl4mtl_grad_light_color_on", AType.BOOL
+    LightColBlend = None, AType.NOT_IMPLEMENTED
+    LightcolAmount = "pcl4mtl_grad_light_color_amount", AType.FLOAT
+    LightcolZoneIDs = "pcl4mtl_grad_light_color_ids", AType.BOOL_LIST_8
+    LightColRelpaceEnable = "pcl4mtl_grad_light_color_replace_on", AType.BOOL
+    LightColRelpaceColor = "pcl4mtl_grad_light_color_replace", AType.COLOR
+    LightColReplaceAmount = "pcl4mtl_grad_light_color_replace_amount", AType.FLOAT
+    HiDesignEnable = None, AType.NOT_IMPLEMENTED
+    HiDesignAmount = None, AType.NOT_IMPLEMENTED
+    HiDesignAngle = None, AType.NOT_IMPLEMENTED
+    ZoneAntiIntensity = None, AType.NOT_IMPLEMENTED
+    ZoneAntiEnable = None, AType.NOT_IMPLEMENTED
+    SpecificLightsEnable = None, AType.NOT_IMPLEMENTED
+    SpecificLightsStrength = None, AType.NOT_IMPLEMENTED
+    SpecificTranspEnable = None, AType.NOT_IMPLEMENTED
+    SpecificTranspMaterials = None, AType.NOT_IMPLEMENTED
+    SpecificTranspMaterialsValue = None, AType.NOT_IMPLEMENTED
+    SpecificTranspMapEnable = None, AType.NOT_IMPLEMENTED
+    SpecificTranspMapAmount = None, AType.NOT_IMPLEMENTED
+    PolygonCntl = None, AType.NOT_IMPLEMENTED
 
+
+class MaxGradation(Node):
+    ZoneId = 'pcl4mtl_zone_ids', AType.INT
+    PosMin = 'pcl4mtl_zone_min_positions', AType.FLOAT
+    PosMax = 'pcl4mtl_zone_max_positions', AType.FLOAT
+    Enable = 'pcl4mtl_zone_color_ons', AType.BOOL
+    Color = 'pcl4mtl_zone_colors', AType.COLOR
+    MapOpacity = None, AType.NOT_IMPLEMENTED #'pcl4mtl_zone_map_opacities', AType.FLOAT
+    ColorMap = None, AType.NOT_IMPLEMENTED
+    ColorMapOn = None, AType.NOT_IMPLEMENTED #'pcl4mtl_zone_map_ons', AType.BOOL
+    BlendMode = None, AType.NOT_IMPLEMENTED
+    BlendAmount = 'pcl4mtl_zone_color_amounts', AType.FLOAT
+    StrokeEnable = None, AType.NOT_IMPLEMENTED
+    Stroke = None, AType.NOT_IMPLEMENTED
+
+
+class UniversalGradation(Node):
+    Position = None, AType.NOT_IMPLEMENTED
+    Interpolation = None, AType.NOT_IMPLEMENTED
+    Color = "Color", AType.FLOAT_ARRAY
+    Enable = "Enable", AType.BOOL
+    BlendMode = None, AType.NOT_IMPLEMENTED
+    BlendAmount = "BlendAmount", AType.FLOAT
+    ColorMapOn = None, AType.NOT_IMPLEMENTED
+    ColorMap = None, AType.NOT_IMPLEMENTED
+    MapOpacity = None, AType.NOT_IMPLEMENTED
+
+
+class PositionGroupNode(Node):
+    _nameToExport = "PositionGroup"
+    _blenderNodeName = ""
+    _blenderNodeId = ""
+    Positions = "pcl4_position_group_values", AType.FLOAT_ARRAY_STRING
+
+
+class ColorGroupNode(Node):
+    _nameToExport = "ColorGroup"
+    _blenderNodeName = ""
+    _blenderNodeId = ""
+    Colors = "pcl4_color_group_values", AType.COLOR_ARRAY_STRING

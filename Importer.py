@@ -5,6 +5,7 @@ import bpy
 import json
 import math
 import inspect
+from typing import Iterable
 
 from . import template as _MP
 from .template import KeyNames as _keys
@@ -48,6 +49,7 @@ class Importer:
             _MP.AType.FLOAT_ANGLE: self._import_float_angle,
             _MP.AType.FLOAT_WITH_SCALE: self._import_float_with_scale,
             _MP.AType.BOOL: self._import_bool,
+            _MP.AType.BOOL_LIST_8: self._import_bool_list_8,
             _MP.AType.ENUM: self._import_enum,
             _MP.AType.FLOAT_VECTOR_2: self._import_float_vector_2,
             _MP.AType.COLOR: self._import_color,
@@ -57,6 +59,11 @@ class Importer:
             _MP.AType.MATERIAL_LIST: self._import_material_list,
             _MP.AType.ADVANCED_MATERIAL: self._import_advanced_material,
             _MP.AType.USERDEF: self._import_userdef,
+            _MP.AType.POSITION_GROUP: self._import_group,
+            _MP.AType.COLOR_GROUP: self._import_group,
+            _MP.AType.FLOAT_ARRAY: self._import_float_array,
+            _MP.AType.FLOAT_ARRAY_STRING: self._import_float_array_string,
+            _MP.AType.COLOR_ARRAY_STRING: self._import_color_array_string,
             _MP.AType.NOT_IMPLEMENTED: self._import_not_implemented
         }
 
@@ -72,11 +79,15 @@ class Importer:
             dict((x.get_node_to_export_name(), x.get_blender_id_name()) for x in param_defs)
 
         self.node_id_to_node_dict = dict()
+        self.imported_materials = dict()
+        self.imported_node_trees = dict()
 
         self.target_node_tree = None
         self.target_scene = None
 
-    def enumerate_lines_from_json_file(self, json_file_path):
+        self.dummy_advanced_materials = dict()
+
+    def enumerate_lines_and_materials_from_json_file(self, json_file_path):
         """
 
         :param json_file_path:
@@ -87,12 +98,13 @@ class Importer:
                 json_dict = json.load(json_file)
                 lines, has_lines = self._try_get(json_dict, _keys.LINES)
                 if not has_lines:
-                    return []
-                return self._enumerate_lines_in_json_dict(json_dict)
+                    return ([], [])
+                return (self._enumerate_lines_in_json_dict(json_dict),
+                        self._enumerate_materials_in_json_dict(json_dict))
         except ValueError:
-            return []
+            return ([], [])
         except OSError:
-            return []
+            return ([], [])
 
     def import_from_json_file(self, json_file, target_node_tree, target_scene, importer_settings: ImporterSettings):
         """
@@ -131,6 +143,43 @@ class Importer:
 
         if not util.is_file_version_supported(json_dict[_keys.FILE_VERSION]):
             raise ValueError("File version is invalid.")
+        
+        # 上書きインポートの結果使用されなくなるデータをあとから削除するために、削除対象になり得る使用中のデータを列挙する
+        if importer_settings.should_overwrite:
+            used_materials = set(mat.pcl4_line_functions for mat, _ in util.enumerate_material_and_line_functions())
+            used_node_groups = (x for x in bpy.data.node_groups if x.users > 0)
+
+        # インポート対象のマテリアルIDを列挙
+        if importer_settings.material_ids is None:
+            material_ids = [x for (x, _) in self._enumerate_materials_in_json_dict(json_dict)]
+        else:
+            material_ids = importer_settings.material_ids
+
+        # 位置グループ・カラーグループのインポート
+        self._create_groups(material_ids, json_dict)
+
+        # マテリアルのインポート
+        self._create_pcl4_materials(material_ids, json_dict[_keys.MATERIALS], importer_settings.should_overwrite)
+
+        #  Line Functions Nodeのインポート
+        self._create_line_functions(material_ids, json_dict[_keys.MATERIALS])
+
+        # ラインのインポート
+        self._import_lines(json_dict, target_node_tree, target_scene, importer_settings)
+
+        # 上書きインポートの結果使用されなくなったデータを削除
+        if importer_settings.should_overwrite:
+            for material in used_materials:
+                if material.users == 0:
+                    bpy.data.materials.remove(material)
+            for node_group in used_node_groups:
+                if node_group.users == 0:
+                    bpy.data.node_groups.remove(node_group)
+
+
+    def _import_lines(self, json_dict, target_node_tree, target_scene, importer_settings: ImporterSettings):
+        if target_node_tree is None or not util.is_line_addon_installed():
+            return
 
         for node in target_node_tree.nodes:
             node.select = False
@@ -172,7 +221,13 @@ class Importer:
                 for i, intput in enumerate(node.inputs):
                     child = intput.get_connected_node()
                     if child:
-                        child.location = node.calc_new_node_position(i)
+                        if node.bl_idname == _MP.LineNode._blenderNodeId:
+                            child.location = [
+                                node.location[0] + node.new_node_step_x * i + node.new_node_offset_x,
+                                node.location[1] + node.new_node_step_y * i + node.new_node_offset_y
+                            ]
+                        else:
+                            child.location = node.calc_new_node_position(i)
                         layout_child_nodes(child)
 
             new_nodes = set(node for node, _ in node_items.values())
@@ -187,9 +242,7 @@ class Importer:
                     node.location = location
                     layout_child_nodes(node)
                 location = [node.location[0], node.location[1] - 200]
-
-        #  Line Functions Nodeのインポート
-        self._create_line_functions(json_dict[_keys.MATERIALS])
+            
 
     def _set_scale_factor(self, json_dict: dict, importer_settings: ImporterSettings):
         if importer_settings.use_custom_scale:
@@ -209,20 +262,31 @@ class Importer:
         return target[key], True
 
     @staticmethod
-    def _enumerate_lines_in_json_dict(json_dict: dict):
+    def _enumerate_nodes_in_json_dict(json_dict: dict, nodes_key: str, node_type_name: str) -> list:
         ret = []
-        for node_id, node_data in json_dict[_keys.LINES].items():
+        for node_id, node_data in json_dict[nodes_key].items():
             node_type, has_node_type = Importer._try_get(node_data, _keys.NODE_TYPE)
-            if not has_node_type:
-                continue
-            line_node_type_name = _MP.LineNode.get_node_to_export_name()
-            if node_type != line_node_type_name:
+            if not has_node_type or node_type != node_type_name:
                 continue
             node_name, has_node_name = Importer._try_get(node_data, _keys.NODE_NAME)
             if not has_node_name or not isinstance(node_name, str):
                 continue
             ret.append((node_id, node_name))
         return ret
+
+    @staticmethod
+    def _enumerate_lines_in_json_dict(json_dict: dict) -> list:
+        return Importer._enumerate_nodes_in_json_dict(
+            json_dict,
+            _keys.LINES,
+            _MP.LineNode.get_node_to_export_name())
+
+    @staticmethod
+    def _enumerate_materials_in_json_dict(json_dict: dict) -> list:
+        return Importer._enumerate_nodes_in_json_dict(
+            json_dict,
+            _keys.MATERIALS,
+            _MP.PencilMaterialNode.get_node_to_export_name())
 
     @staticmethod
     def _collect_line_nodes(
@@ -327,54 +391,202 @@ class Importer:
 
     def _set_node_parameters(self, node_items):
         for nid, (node, data) in node_items.items():
+            self._import_parameters_from_json_data(node, nid, data)
             json_params = data[_keys.PARAMS]
-            exported_name = data[_keys.NODE_TYPE]
-            node_params_def = self.node_types[exported_name]
-            for json_param_name, (attr_name, attr_type) in node_params_def.get_params():
-                try:
-                    self.importers[attr_type](node, attr_name, json_params[json_param_name])
-                except Exception as err:
-                    self.skipped_attributes.append((nid, attr_name, err))
-            if exported_name == "TextureMap":
-                print(json_params)
-            if exported_name == "TextureMap" \
+            if data[_keys.NODE_TYPE] == "TextureMap" \
                     and "TextureUV" in json_params \
                     and "ExtendedTextureUV" not in json_params:
                 self._modify_texture_map_node(node, json_params)
 
+    def _import_parameters_from_json_params(self, object, nid, json_params, params_def):
+        for json_param_name, (attr_name, attr_type) in params_def.get_params():
+            try:
+                self.importers[attr_type](object, attr_name, json_params[json_param_name])
+            except Exception as err:
+                self.skipped_attributes.append((nid, attr_name, err))
+
+    def _import_parameters_from_json_data(self, object, nid, data):
+        self._import_parameters_from_json_params(object, nid, data[_keys.PARAMS], self.node_types[data[_keys.NODE_TYPE]])
+
+    def _create_groups(self, material_ids: Iterable[str], json_dict: dict):
+        if not util.is_material_addon_installed():
+            return
+
+        material_ids = set(material_ids)
+        if len(material_ids) == 0:
+            return
+        
+        material_dict = json_dict[_keys.MATERIALS]
+        groups_def = (
+            (json_dict.get(_keys.POSITION_GROUP), _MP.PositionGroupNode, "PositionGroup", lambda x: len(x["Positions"]) // 2, bpy.ops.pcl4mtl.new_position_group_node_tree),
+            (json_dict.get(_keys.COLOR_GROUP), _MP.ColorGroupNode, "ColorGroup", lambda x: len(x["Colors"]), bpy.ops.pcl4mtl.new_color_group_node_tree),
+        )
+        for groups_dict, params_def, material_param, num_zones_func, ot_new_group in groups_def:
+            if groups_dict is None:
+                continue
+            group_ids = set()
+            for nid, data in material_dict.items():
+                if nid not in material_ids:
+                    continue
+                group_id = data[_keys.PARAMS].get(material_param)
+                if group_id is not None:
+                    group_ids.add(group_id)
+            for nid, data in groups_dict.items():
+                try:
+                    if nid not in group_ids:
+                        continue
+                    node_groups_prev = set(bpy.data.node_groups)
+                    num_zones = num_zones_func(data[_keys.PARAMS])
+                    ot_new_group(num_zones=num_zones)
+                    new_group = next((x for x in bpy.data.node_groups if x not in node_groups_prev))
+                    self._import_parameters_from_json_params(new_group, nid, data[_keys.PARAMS], params_def)
+                    new_group.name = data[_keys.NODE_NAME]
+                    self.imported_node_trees[nid] = new_group
+                except Exception as err:
+                    print(err)
+                    self.skipped_nodes[nid] = err
+
+    def _create_pcl4_materials(self, material_ids: Iterable[str], materials_dict: dict, should_overwrite: bool):
+        if not util.is_material_addon_installed():
+            return
+
+        material_ids = set(material_ids)
+        if len(material_ids) == 0:
+            return
+
+        class Dummy:
+            pass
+        class GradationDummy:
+            def __init__(self, importer, nid, data) -> None:
+                gradation_data = data.get("MaxGradation")
+                if gradation_data is None and "UniversalGradation" in data:
+                    gradation_data = list()
+                    src_data = data["UniversalGradation"]
+                    prev = None
+                    prev_interpolation = 0
+                    for gradation in src_data:
+                        curr = Dummy()
+                        importer._import_parameters_from_json_params(curr, nid, gradation, _MP.UniversalGradation)
+                        position = gradation.get("Position", 0.0)
+                        interpolation = gradation.get("Interpolation", 0)
+                        if prev is not None and prev_interpolation == 0:
+                            gradation_data[-1]["PosMax"] = position
+                            if interpolation != 0 and vars(prev) == vars(curr):
+                                prev = None
+                                continue
+                        zone = dict(vars(curr))
+                        zone["PosMin"] = position
+                        zone["PosMax"] = position
+                        gradation_data.append(zone)
+                        prev = curr
+                        prev_interpolation = interpolation
+                    if len(gradation_data) > 0:
+                        gradation_data[0]["PosMin"] = 0.0
+                        gradation_data[-1]["PosMax"] = 1.0
+                if gradation_data is None:
+                    self.zone_num = 0
+                    return
+                params_def = _MP.MaxGradation
+                self.zone_num = len(gradation_data)
+                dummies = []
+                for json_params in gradation_data:
+                    dummy = Dummy()
+                    dummies.append(dummy)
+                    importer._import_parameters_from_json_params(dummy, nid, json_params, params_def)
+                attr_defaults = {
+                    "pcl4mtl_zone_ids": 1,
+                    "pcl4mtl_zone_min_positions": 0.0,
+                    "pcl4mtl_zone_max_positions": 0.0,
+                    "pcl4mtl_zone_color_ons": True,
+                    "pcl4mtl_zone_colors": (0.0, 0.0, 0.0, 1.0),
+                    "pcl4mtl_zone_map_opacities": 1.0,
+                    "pcl4mtl_zone_map_ons": False,
+                    "pcl4mtl_zone_color_amounts": 1.0,
+                }
+                for _, (attr_name, attr_type) in params_def.get_params():
+                    if attr_type == _MP.AType.NOT_IMPLEMENTED:
+                        continue
+                    value_list = [getattr(dummy, attr_name, attr_defaults[attr_name]) for dummy in dummies]
+                    attr = ",".join([str(x) for x in value_list]) if attr_type != _MP.AType.COLOR else\
+                        ";".join([",".join([str(x) for x in sub_list]) for sub_list in value_list])
+                    setattr(self, attr_name, attr)
+
+        for nid in material_ids:
+            data = materials_dict[nid]
+            try:
+                if data[_keys.NODE_TYPE] != "AdvancedMaterial" or nid in self.dummy_advanced_materials:
+                    continue
+                dummy = Dummy()
+                self.dummy_advanced_materials[nid] = dummy
+                self._import_parameters_from_json_data(dummy, nid, data)
+            except Exception as err:
+                self.skipped_nodes[nid] = err
+        for nid in material_ids:
+            data = materials_dict[nid]
+            try:
+                if data[_keys.NODE_TYPE] != "PencilMaterial" or nid not in material_ids:
+                    continue
+                name = data[_keys.NODE_NAME]
+                if should_overwrite and name in bpy.data.materials and bpy.data.materials[name].library is None:
+                    material = bpy.data.materials[name]
+                else:
+                    material = bpy.data.materials.new(name=name)
+                    material.name = name
+                self.imported_materials[name] = material
+                material.use_nodes = True
+                dummy = GradationDummy(self, nid, data[_keys.PARAMS].get("Gradation"))
+                util.operator_call_with_override(
+                    bpy.ops.pcl4mtl.initialize_material,
+                    bpy.context, {"material": material}, {"zone_num": dummy.zone_num})
+                self._import_parameters_from_json_data(material, nid, data)
+                for _, (attr_name, _) in _MP.MaxGradation.get_params():
+                    value = getattr(dummy, attr_name, None) if attr_name is not None else None
+                    if value is not None:
+                        setattr(material, attr_name, value)
+            except Exception as err:
+                self.skipped_nodes[nid] = err
 
 
-    def _create_line_functions(self, materials_dict):
-        for nid, data in materials_dict.items():
+    def _create_line_functions(self, material_ids: Iterable[str], materials_dict):
+        if not util.is_line_addon_installed():
+            return
+        for nid in material_ids:
+            data = materials_dict[nid]
             try:
                 if data[_keys.NODE_TYPE] != "PencilMaterial":
                     continue
-                material_name = data[_keys.NODE_NAME]
                 line_functions_id = data[_keys.PARAMS]["LineFunctions"]
-                if line_functions_id is None:
+                if line_functions_id is None or line_functions_id not in materials_dict:
                     continue
-                if line_functions_id not in materials_dict:
-                    continue
-                line_functions_data = materials_dict[line_functions_id]
-                target_material = bpy.data.materials.get(material_name)
+                material_name = data[_keys.NODE_NAME]
+                target_material = self.imported_materials.get(material_name)
                 if target_material is None:
-                    target_material = bpy.data.materials.new(name=material_name)
-                line_functions_mat = bpy.data.materials.new(name=line_functions_data[_keys.NODE_NAME])
-                target_material.pcl4_line_functions = line_functions_mat
-                line_functions_mat.use_nodes = True
-                while len(line_functions_mat.node_tree.nodes) > 0:
-                    line_functions_mat.node_tree.nodes.remove(line_functions_mat.node_tree.nodes[0])
-                node = line_functions_mat.node_tree.nodes.new(type="Pencil4LineFunctionsContainerNodeType")
-                node.name = line_functions_data[_keys.NODE_NAME]
-                line_functions_mat.use_nodes = False
+                    target_material = bpy.data.materials.get(material_name)
+                    if target_material is None:
+                        target_material = bpy.data.materials.new(name=material_name)
+                        target_material.name = material_name
+                        self.imported_materials[material_name] = target_material
+                line_functions_data = materials_dict[line_functions_id]
+                line_finctions_name = line_functions_data[_keys.NODE_NAME]
+                line_functions_mat = self.imported_materials.get(line_finctions_name)
+                if line_functions_mat is None:
+                    line_functions_mat = bpy.data.materials.new(name=line_finctions_name)
+                    self.imported_materials[line_finctions_name] = line_functions_mat
+                    line_functions_mat.use_nodes = True
+                    while len(line_functions_mat.node_tree.nodes) > 0:
+                        line_functions_mat.node_tree.nodes.remove(line_functions_mat.node_tree.nodes[0])
+                    node = line_functions_mat.node_tree.nodes.new(type="Pencil4LineFunctionsContainerNodeType")
+                    node.name = line_finctions_name
+                    line_functions_mat.use_nodes = False
 
-                json_params = line_functions_data[_keys.PARAMS]
-                node_params_def = self.node_types["LineRelatedFunctions"]
-                for json_param_name, (attr_name, attr_type) in node_params_def.get_params():
-                    try:
-                        self.importers[attr_type](node, attr_name, json_params[json_param_name])
-                    except Exception as err:
-                        self.skipped_attributes.append((nid, attr_name, err))
+                    json_params = line_functions_data[_keys.PARAMS]
+                    node_params_def = self.node_types["LineRelatedFunctions"]
+                    for json_param_name, (attr_name, attr_type) in node_params_def.get_params():
+                        try:
+                            self.importers[attr_type](node, attr_name, json_params[json_param_name])
+                        except Exception as err:
+                            self.skipped_attributes.append((nid, attr_name, err))
+                target_material.pcl4_line_functions = line_functions_mat
             except Exception as err:
                 self.skipped_nodes[nid] = err
 
@@ -443,6 +655,9 @@ class Importer:
     def _import_bool(self, node, prop_name, value):
         setattr(node, prop_name, bool(value))
 
+    def _import_bool_list_8(self, node, prop_name, value):
+        setattr(node, prop_name, value[:min(8, len(value))] + [False] * max(0, 8 - len(value)))
+
     def _import_enum(self, node, prop_name, value):
         enum_items = node.bl_rna.properties[prop_name].enum_items
         setattr(node, prop_name, enum_items[value].identifier)
@@ -463,20 +678,43 @@ class Importer:
     def _import_material(self, node, prop_name, value):
         if value is None:
             return
-        mat = bpy.data.materials.get(value["Name"])
+        mat = self.imported_materials.get(value["Name"])
+        if mat is None:
+            mat = bpy.data.materials.get(value["Name"])
         if mat is None:
             return
         setattr(node, prop_name, mat)
 
     def _import_material_list(self, node, prop_name, value):
         for mat_data in value:
-            mat = bpy.data.materials.get(mat_data["Name"])
+            mat = self.imported_materials.get(mat_data["Name"])
+            if mat is None:
+                mat = bpy.data.materials.get(mat_data["Name"])
             if mat is not None:
                 new_elem = getattr(node, prop_name).add()
                 new_elem.content = mat
 
     def _import_advanced_material(self, node, prop_name, value):
-        pass
+        dummy = self.dummy_advanced_materials.get(value, None)
+        if dummy is None:
+            return
+        params_def = self.node_types["AdvancedMaterial"]
+        for _, (attr_name, _) in params_def.get_params():
+            if attr_name is not None and hasattr(dummy, attr_name):
+                setattr(node, attr_name, getattr(dummy, attr_name))
+    
+    def _import_group(self, node, prop_name, value):
+        if value in self.imported_node_trees:
+            setattr(node, prop_name, self.imported_node_trees[value].name_full)
+
+    def _import_float_array(self, node, prop_name, value):
+        setattr(node, prop_name, value)
+
+    def _import_float_array_string(self, node, prop_name, value):
+        setattr(node, prop_name, ",".join([str(x) for x in value]))
+    
+    def _import_color_array_string(self, node, prop_name, value):
+        setattr(node, prop_name, ";".join([",".join([str(x) for x in sub_list]) for sub_list in value]))
 
     def _import_userdef(self, node, prop_name, value):
         pass
